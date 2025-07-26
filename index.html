@@ -128,6 +128,7 @@
                 <h2>گروه‌ها</h2>
                 <input type="text" id="group-name" placeholder="نام گروه">
                 <input type="text" id="group-pic" placeholder="لینک عکس گروه (اختیاری)">
+                <input type="text" id="group-members" placeholder="نام‌های کاربری سراسری اعضا (با کاما)">
                 <button onclick="createGroup()">ساخت گروه</button>
                 <div id="groups-list"></div>
             </div>
@@ -148,7 +149,6 @@
         let token = "";
         let myUserId = "";
         let currentChat = null; // {type: 'friend'|'group', id: ...}
-        let lastMessageCount = 0;
 
         function show(id) {
             document.getElementById(id).classList.remove('hidden');
@@ -265,21 +265,29 @@
             });
         }
 
-        // ساخت گروه فقط با خود کاربر و نمایش لینک عضویت
         async function createGroup() {
             let name = document.getElementById('group-name').value.trim();
             let profile_pic = document.getElementById('group-pic').value.trim();
-            if (!name) return;
+            let members_raw = document.getElementById('group-members').value.trim();
+            let members = members_raw.split(',').map(x => x.trim()).filter(x => x);
+            // تبدیل نام کاربری سراسری به userId باید انجام شود
+            let memberIds = [];
+            for (let uname of members) {
+                let res = await fetch(API + "/login", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({global_username: uname, password: "___"})
+                });
+                let data = await res.json();
+                if (data.user) memberIds.push(data.user.id);
+            }
+            if (!name || memberIds.length === 0) return;
             let res = await fetch(API + "/group", {
                 method: "POST",
                 headers: {"Content-Type": "application/json", "Authorization": "Bearer " + token},
-                body: JSON.stringify({name, profile_pic})
+                body: JSON.stringify({name, profile_pic, members: memberIds})
             });
-            let data = await res.json();
-            if (res.ok) {
-                loadGroups();
-                alert("لینک دعوت به گروه (ارسال برای دوستان):\n" + window.location.origin + window.location.pathname + "?join=" + data.id);
-            }
+            if (res.ok) loadGroups();
         }
 
         async function loadGroups() {
@@ -299,7 +307,6 @@
 
         function openChat(type, id, title) {
             currentChat = {type, id};
-            lastMessageCount = 0;
             document.getElementById('chat-title').textContent = type === 'friend' ? 'چت با ' + title : 'گروه: ' + title;
             show('chat-section');
             loadMessages();
@@ -310,7 +317,24 @@
             currentChat = null;
         }
 
-        // نمایش نام فرستنده به جای آی‌دی و رفرش فقط در صورت تغییر
+        async function sendMessage() {
+            let input = document.getElementById('chat-input');
+            let content = input.value.trim();
+            if (!content || !currentChat) return;
+            let body = {content};
+            if (currentChat.type === 'friend') body.to = currentChat.id;
+            else body.group_id = currentChat.id;
+            let res = await fetch(API + "/message", {
+                method: "POST",
+                headers: {"Content-Type": "application/json", "Authorization": "Bearer " + token},
+                body: JSON.stringify(body)
+            });
+            if (res.ok) {
+                input.value = "";
+                loadMessages();
+            }
+        }
+
         async function loadMessages() {
             if (!currentChat) return;
             let body = {};
@@ -322,55 +346,21 @@
                 body: JSON.stringify(body)
             });
             let data = await res.json();
-            if (data.length !== lastMessageCount) {
-                let box = document.getElementById('chat-messages');
-                box.innerHTML = "";
-                for (const msg of data) {
-                    let name = "";
-                    if (msg.sender !== myUserId) {
-                        let fRes = await fetch(API + "/profile-id?id=" + msg.sender, {
-                            headers: {"Authorization": "Bearer " + token}
-                        });
-                        let profile = await fRes.json();
-                        name = profile.username || msg.sender;
-                    }
-                    let time = new Date(msg.sent_at).toLocaleTimeString();
-                    let ticks = msg.read_at ? "<span class='tick'>✔✔</span>" : "<span class='tick'>✔</span>";
-                    let isMe = msg.sender === myUserId;
-                    let div = document.createElement('div');
-                    div.className = "message" + (isMe ? " me" : "");
-                    div.innerHTML = (isMe ? "" : `<span>${name}</span> `) + msg.content + ` <small>${time}</small> ${isMe ? ticks : ""}`;
-                    box.appendChild(div);
-                }
-                lastMessageCount = data.length;
-            }
+            let box = document.getElementById('chat-messages');
+            box.innerHTML = "";
+            data.forEach(msg => {
+                let time = new Date(msg.sent_at).toLocaleTimeString();
+                let ticks = msg.read_at ? "<span class='tick'>✔✔</span>" : "<span class='tick'>✔</span>";
+                let isMe = msg.sender === myUserId;
+                let div = document.createElement('div');
+                div.className = "message" + (isMe ? " me" : "");
+                div.innerHTML = (isMe ? "" : `<span>${msg.sender}</span> `) + msg.content + ` <small>${time}</small> ${isMe ? ticks : ""}`;
+                box.appendChild(div);
+            });
         }
 
-        // هر بار ورود، پیام‌ها را هر 3 ثانیه فقط در صورت تغییر بررسی کن
+        // هر بار ورود، پیام‌ها را هر 3 ثانیه بررسی کن
         setInterval(() => { if (currentChat) loadMessages(); }, 3000);
-
-        // عضویت با لینک گروه (join)
-        const params = new URLSearchParams(window.location.search);
-        if (params.has("join")) {
-            const group_id = params.get("join");
-            if (localStorage.getItem('pathway_token')) {
-                fetch(API + "/join-group", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json", "Authorization": "Bearer " + localStorage.getItem('pathway_token')},
-                    body: JSON.stringify({group_id})
-                }).then(res => res.json()).then(data => {
-                    if (data.id) {
-                        alert("شما عضو گروه " + data.name + " شدید!");
-                        loadGroups();
-                        window.history.replaceState({}, document.title, window.location.pathname); // حذف پارامتر join از URL
-                    } else {
-                        alert("عضویت در گروه ممکن نشد.");
-                    }
-                });
-            } else {
-                alert("برای عضویت ابتدا وارد حساب کاربری شوید.");
-            }
-        }
 
         // هنگام لود صفحه، توکن را از localStorage بخوان
         token = localStorage.getItem('pathway_token') || "";
