@@ -354,13 +354,13 @@
                 let isMe = msg.sender === myUserId;
                 let div = document.createElement('div');
                 div.className = "message" + (isMe ? " me" : "");
-                div.innerHTML = (isMe ? "" : `<span>${msg.sender}</span> `) + msg.content + ` <small>${time}</small> ${isMe ? ticks : ""}`;
+                div.innerHTML = (isMe ? "" : `<span>${name}</span> `) + msg.content + ` <small>${time}</small> ${isMe ? ticks : ""}`;
                 box.appendChild(div);
             });
         }
 
         // هر بار ورود، پیام‌ها را هر 3 ثانیه بررسی کن
-        setInterval(() => { if (currentChat) loadMessages(); }, 3000);
+        setInterval(() => { if (currentChat) loadMessages(); }, 500);
 
         // هنگام لود صفحه، توکن را از localStorage بخوان
         token = localStorage.getItem('pathway_token') || "";
